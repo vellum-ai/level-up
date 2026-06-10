@@ -1,0 +1,28 @@
+{
+  "name": "level-up",
+  "version": "0.0.1",
+  "description": "Surfaces a first-class \"Level Up\" diff card whenever the assistant edits its own skills or plugins, so the user can see how it improved itself after the fact.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "@vellumai/plugin-api": "^0.8.0"
+  },
+  "peerDependenciesMeta": {
+    "@vellumai/plugin-api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.10",
+    "@types/node": "25.5.0",
+    "typescript": "5.9.3"
+  }
+}
