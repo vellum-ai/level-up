@@ -10,7 +10,11 @@
  * best-effort, after-the-fact summary.
  */
 
-import type { CapabilityKind, CapabilityRef } from "./detect.js";
+import type {
+  CapabilityChange,
+  CapabilityKind,
+  CapabilityRef,
+} from "./detect.js";
 
 /** Accumulated changes to a single capability within one turn. */
 export interface PendingCapability {
@@ -18,8 +22,26 @@ export interface PendingCapability {
   readonly name: string;
   /** Files touched this turn, in first-seen order, de-duplicated. */
   readonly files: string[];
-  /** True when any touched file was newly created this turn. */
-  created: boolean;
+  /** The net change to this capability across the turn's edits. */
+  change: CapabilityChange;
+}
+
+/**
+ * Reduce two changes to the same capability within one turn to the most
+ * representative final label. A deletion is the terminal state, so it wins;
+ * otherwise a creation outranks a plain update.
+ */
+function mergeChange(
+  current: CapabilityChange,
+  next: CapabilityChange,
+): CapabilityChange {
+  if (current === "deleted" || next === "deleted") {
+    return "deleted";
+  }
+  if (current === "created" || next === "created") {
+    return "created";
+  }
+  return "updated";
 }
 
 interface ConversationBatch {
@@ -56,7 +78,7 @@ export interface RecordResult {
 export function recordCapabilityEdit(
   conversationId: string,
   ref: CapabilityRef,
-  created: boolean,
+  change: CapabilityChange,
 ): RecordResult {
   let batch = batches.get(conversationId);
   if (batch === undefined) {
@@ -71,13 +93,13 @@ export function recordCapabilityEdit(
       kind: ref.kind,
       name: ref.name,
       files: [ref.file],
-      created,
+      change,
     });
   } else {
     if (!existing.files.includes(ref.file)) {
       existing.files.push(ref.file);
     }
-    existing.created = existing.created || created;
+    existing.change = mergeChange(existing.change, change);
   }
 
   const shouldNudge = !batch.nudged;

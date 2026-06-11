@@ -35,7 +35,7 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN the edit is recorded against the conversation
     expect(getPendingCapabilities("conv-A")).toEqual([
-      { kind: "skill", name: "sanity", files: ["SKILL.md"], created: false },
+      { kind: "skill", name: "sanity", files: ["SKILL.md"], change: "updated" },
     ]);
     // AND the model is nudged to render the Level Up card
     expect(ctx.additionalContext).toContain("[level-up]");
@@ -73,7 +73,7 @@ describe("level-up post-tool-use hook", () => {
         kind: "skill",
         name: "sanity",
         files: ["SKILL.md", "references/api.md"],
-        created: true,
+        change: "created",
       },
     ]);
     // AND the model is not nudged again for the same batch
@@ -130,5 +130,86 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN nothing is recorded
     expect(getPendingCapabilities("conv-A")).toEqual([]);
+  });
+
+  test("records a managed skill creation via scaffold_managed_skill", async () => {
+    // GIVEN the assistant created a new skill through the managed-skill tool
+    // (which writes SKILL.md through the store, not a path-bearing file_write)
+    const ctx = postToolUseCtx({
+      conversationId: "conv-A",
+      messages: [
+        userText("create a skill called bam"),
+        assistantToolCall("call-1", "scaffold_managed_skill", {
+          skill_id: "bam",
+          name: "BAM",
+          description: "When to use the BAM sound effect",
+          body_markdown: "# BAM\n...",
+        }),
+      ],
+      toolResponse: toolResult(
+        "call-1",
+        JSON.stringify({ created: true, skill_id: "bam", path: "skills/bam" }),
+      ),
+    });
+
+    // WHEN the hook runs
+    await postToolUse(ctx);
+
+    // THEN the skill is recorded as created and the model is nudged
+    expect(getPendingCapabilities("conv-A")).toEqual([
+      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "created" },
+    ]);
+    expect(ctx.additionalContext).toContain("[level-up]");
+  });
+
+  test("records an overwrite via scaffold_managed_skill as an update", async () => {
+    // GIVEN the assistant overwrote an existing skill
+    const ctx = postToolUseCtx({
+      conversationId: "conv-A",
+      messages: [
+        assistantToolCall("call-1", "scaffold_managed_skill", {
+          skill_id: "bam",
+          name: "BAM",
+          description: "Updated guidance",
+          body_markdown: "# BAM\n...",
+          overwrite: true,
+        }),
+      ],
+      toolResponse: toolResult(
+        "call-1",
+        JSON.stringify({ created: true, skill_id: "bam", path: "skills/bam" }),
+      ),
+    });
+
+    // WHEN the hook runs
+    await postToolUse(ctx);
+
+    // THEN the skill is recorded as updated
+    expect(getPendingCapabilities("conv-A")).toEqual([
+      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "updated" },
+    ]);
+  });
+
+  test("records a managed skill deletion via delete_managed_skill", async () => {
+    // GIVEN the assistant deleted a managed skill
+    const ctx = postToolUseCtx({
+      conversationId: "conv-A",
+      messages: [
+        assistantToolCall("call-1", "delete_managed_skill", { skill_id: "bam" }),
+      ],
+      toolResponse: toolResult(
+        "call-1",
+        JSON.stringify({ deleted: true, skill_id: "bam" }),
+      ),
+    });
+
+    // WHEN the hook runs
+    await postToolUse(ctx);
+
+    // THEN the skill is recorded as deleted and the model is nudged
+    expect(getPendingCapabilities("conv-A")).toEqual([
+      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "deleted" },
+    ]);
+    expect(ctx.additionalContext).toContain("[level-up]");
   });
 });

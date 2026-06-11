@@ -18,8 +18,24 @@ export const EDIT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "host_file_write",
 ]);
 
+/**
+ * Managed-skill authoring tools, contributed by the host's `skill-management`
+ * bundled skill and executed on the host. Unlike the filesystem tools above,
+ * these mutate a skill through the managed-skill store
+ * (`<workspace>/skills/<id>/SKILL.md`) rather than a path-bearing `file_write`,
+ * so they never surface a path `classifyCapabilityPath` could match. We key on
+ * the tool name and read the capability out of its structured input instead.
+ */
+export const MANAGED_SKILL_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "scaffold_managed_skill",
+  "delete_managed_skill",
+]);
+
 /** A capability the assistant can edit and "level up". */
 export type CapabilityKind = "skill" | "plugin";
+
+/** How a capability changed this turn. Drives the card's per-change verb. */
+export type CapabilityChange = "created" | "updated" | "deleted";
 
 export interface CapabilityRef {
   readonly kind: CapabilityKind;
@@ -27,6 +43,12 @@ export interface CapabilityRef {
   readonly name: string;
   /** Path of the edited file relative to the capability root, e.g. `"SKILL.md"`. */
   readonly file: string;
+}
+
+/** A single recognized capability change: which capability, and how it changed. */
+export interface CapabilityEdit {
+  readonly ref: CapabilityRef;
+  readonly change: CapabilityChange;
 }
 
 /**
@@ -101,6 +123,80 @@ export function resultLooksLikeNewFile(content: string): boolean {
 
 export function isToolUse(block: ContentBlock): block is ToolUseContent {
   return block.type === "tool_use";
+}
+
+/**
+ * Classify a managed-skill authoring tool call into a capability change.
+ *
+ * `scaffold_managed_skill` creates a skill, or updates it when `overwrite` is
+ * set; `delete_managed_skill` removes it. Both identify the skill by its
+ * `skill_id` input, and the managed store always writes the skill's top-level
+ * `SKILL.md`, so that is the file we attribute the change to.
+ *
+ * Returns `null` for any other tool, or when the input lacks a usable
+ * `skill_id`.
+ */
+export function classifyManagedSkillTool(
+  toolName: string,
+  input: Record<string, unknown>,
+): CapabilityEdit | null {
+  if (!MANAGED_SKILL_TOOL_NAMES.has(toolName)) {
+    return null;
+  }
+
+  const skillId = getStringInput(input, "skill_id");
+  if (skillId === null || skillId.trim() === "") {
+    return null;
+  }
+
+  const ref: CapabilityRef = {
+    kind: "skill",
+    name: skillId.trim(),
+    file: "SKILL.md",
+  };
+
+  if (toolName === "delete_managed_skill") {
+    return { ref, change: "deleted" };
+  }
+
+  const change: CapabilityChange =
+    input.overwrite === true ? "updated" : "created";
+  return { ref, change };
+}
+
+/**
+ * Recognize whether a successful tool result represents a change to one of the
+ * assistant's own skills or plugins. Handles both the managed-skill authoring
+ * tools (by tool name + input) and the generic filesystem tools (by edited
+ * path), returning a single normalized {@link CapabilityEdit} either way.
+ */
+export function detectCapabilityEdit(
+  toolUse: ToolUseContent,
+  resultContent: string,
+): CapabilityEdit | null {
+  const managed = classifyManagedSkillTool(toolUse.name, toolUse.input);
+  if (managed !== null) {
+    return managed;
+  }
+
+  if (!EDIT_TOOL_NAMES.has(toolUse.name)) {
+    return null;
+  }
+
+  const path = getStringInput(toolUse.input, "path");
+  if (path === null) {
+    return null;
+  }
+
+  const ref = classifyCapabilityPath(path);
+  if (ref === null) {
+    return null;
+  }
+
+  const change: CapabilityChange = resultLooksLikeNewFile(resultContent)
+    ? "created"
+    : "updated";
+  return { ref, change };
 }
 
 export function getStringInput(

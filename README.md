@@ -16,13 +16,22 @@ This is a **model-driven** implementation (no host changes required). The plugin
 contributes two lifecycle hooks and no UI surface of its own — it drives the
 host's built-in `ui_show` tool to render the card.
 
-1. **`post-tool-use`** — fires after every tool result. It identifies
-   filesystem edits (`file_edit` / `file_write` and their `host_*` twins) whose
-   target lives under `skills/<name>/…` or `plugins/<name>/…`, and accumulates
-   them into a per-turn batch (one entry per capability, collecting every file
-   touched). On the first edit of a batch it appends a model-only
-   `additionalContext` nudge asking the model to render a Level Up card before
-   it ends the turn.
+1. **`post-tool-use`** — fires after every tool result. It identifies changes
+   to the assistant's own capabilities and accumulates them into a per-turn
+   batch (one entry per capability, collecting every file touched). Two kinds of
+   change are recognized:
+   - **Filesystem edits** (`file_edit` / `file_write` and their `host_*` twins)
+     whose target lives under `skills/<name>/…` or `plugins/<name>/…`.
+   - **Managed-skill authoring tools** (`scaffold_managed_skill` /
+     `delete_managed_skill`, contributed by the host's `skill-management`
+     bundled skill). These write a skill's `SKILL.md` through the managed-skill
+     store rather than a path-bearing `file_write`, so they're matched by tool
+     name and the capability is read from the `skill_id` input. This is how the
+     assistant creates/updates/deletes skills in normal use, so without it the
+     most common self-improvement path would go unnoticed.
+
+   On the first change of a batch it appends a model-only `additionalContext`
+   nudge asking the model to render a Level Up card before it ends the turn.
 2. **`stop`** — fires at the turn boundary. If the turn touched a skill/plugin
    and the model has **not** already rendered a `ui_show` card on its own, it
    appends a fully-specified nudge and forces one more loop iteration so the
