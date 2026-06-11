@@ -22,10 +22,9 @@ const UI_SHOW_TOOL_NAMES: ReadonlySet<string> = new Set([
 
 function describeTargets(capabilities: ReadonlyArray<PendingCapability>): string {
   return capabilities
-    .map((cap) => {
-      const verb = cap.created ? "created" : "updated";
-      return `- ${cap.kind} "${cap.name}" — ${verb} ${cap.files.join(", ")}`;
-    })
+    .map(
+      (cap) => `- ${cap.kind} "${cap.name}" — ${cap.change} ${cap.files.join(", ")}`,
+    )
     .join("\n");
 }
 

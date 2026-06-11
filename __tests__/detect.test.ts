@@ -8,10 +8,14 @@ import { describe, expect, test } from "bun:test";
 
 import {
   classifyCapabilityPath,
+  classifyManagedSkillTool,
+  detectCapabilityEdit,
   findToolUse,
   resultLooksLikeNewFile,
 } from "../src/detect.ts";
-import { assistantToolCall, userText } from "./_helpers.ts";
+import { assistantToolCall, toolUseBlock, userText } from "./_helpers.ts";
+
+import type { ToolUseContent } from "@vellumai/plugin-api";
 
 describe("classifyCapabilityPath", () => {
   test("classifies a workspace-relative skill file", () => {
@@ -123,6 +127,107 @@ describe("findToolUse", () => {
 
     // THEN null is returned
     expect(found).toBeNull();
+  });
+});
+
+describe("classifyManagedSkillTool", () => {
+  test("classifies a fresh scaffold_managed_skill call as a skill creation", () => {
+    // GIVEN a scaffold call without overwrite
+    // WHEN classified
+    const edit = classifyManagedSkillTool("scaffold_managed_skill", {
+      skill_id: "bam",
+      name: "BAM",
+    });
+
+    // THEN it is the bam skill's SKILL.md, created
+    expect(edit).toEqual({
+      ref: { kind: "skill", name: "bam", file: "SKILL.md" },
+      change: "created",
+    });
+  });
+
+  test("treats an overwriting scaffold as an update", () => {
+    // GIVEN a scaffold call with overwrite set
+    // WHEN classified
+    const edit = classifyManagedSkillTool("scaffold_managed_skill", {
+      skill_id: "bam",
+      overwrite: true,
+    });
+
+    // THEN the change is an update
+    expect(edit?.change).toBe("updated");
+  });
+
+  test("classifies delete_managed_skill as a deletion", () => {
+    // GIVEN a delete call
+    // WHEN classified
+    const edit = classifyManagedSkillTool("delete_managed_skill", {
+      skill_id: "bam",
+    });
+
+    // THEN it is the bam skill, deleted
+    expect(edit).toEqual({
+      ref: { kind: "skill", name: "bam", file: "SKILL.md" },
+      change: "deleted",
+    });
+  });
+
+  test("ignores other tools and inputs without a skill_id", () => {
+    // GIVEN a non-managed tool, and a managed tool missing skill_id
+    // WHEN classified
+    // THEN nothing matches
+    expect(
+      classifyManagedSkillTool("file_write", { skill_id: "bam" }),
+    ).toBeNull();
+    expect(classifyManagedSkillTool("scaffold_managed_skill", {})).toBeNull();
+    expect(
+      classifyManagedSkillTool("scaffold_managed_skill", { skill_id: "  " }),
+    ).toBeNull();
+  });
+});
+
+describe("detectCapabilityEdit", () => {
+  test("detects a managed-skill tool by name, ignoring the result text", () => {
+    // GIVEN a scaffold_managed_skill call
+    const toolUse = toolUseBlock("call-1", "scaffold_managed_skill", {
+      skill_id: "bam",
+    }) as ToolUseContent;
+
+    // WHEN detecting the capability edit
+    const edit = detectCapabilityEdit(toolUse, '{"created":true}');
+
+    // THEN it resolves to the created bam skill
+    expect(edit).toEqual({
+      ref: { kind: "skill", name: "bam", file: "SKILL.md" },
+      change: "created",
+    });
+  });
+
+  test("detects a filesystem edit by path, labeling new files as created", () => {
+    // GIVEN a file_write to a new skill file
+    const toolUse = toolUseBlock("call-1", "file_write", {
+      path: "skills/sanity/SKILL.md",
+    }) as ToolUseContent;
+
+    // WHEN detecting the capability edit from a new-file result
+    const edit = detectCapabilityEdit(toolUse, "Wrote file (new file, 40 lines)");
+
+    // THEN it resolves to the created sanity skill
+    expect(edit).toEqual({
+      ref: { kind: "skill", name: "sanity", file: "SKILL.md" },
+      change: "created",
+    });
+  });
+
+  test("returns null for tools that touch nothing relevant", () => {
+    // GIVEN an unrelated tool call
+    const toolUse = toolUseBlock("call-1", "web_search", {
+      query: "hello",
+    }) as ToolUseContent;
+
+    // WHEN detecting the capability edit
+    // THEN there is nothing to report
+    expect(detectCapabilityEdit(toolUse, "results")).toBeNull();
   });
 });
 

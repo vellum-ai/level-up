@@ -21,7 +21,11 @@ beforeEach(() => {
 describe("level-up stop hook", () => {
   test("forces a follow-up turn when the model ended without a card", async () => {
     // GIVEN the turn recorded a skill edit but rendered no ui_show card
-    recordCapabilityEdit("conv-A", { kind: "skill", name: "sanity", file: "SKILL.md" }, false);
+    recordCapabilityEdit(
+      "conv-A",
+      { kind: "skill", name: "sanity", file: "SKILL.md" },
+      "updated",
+    );
     const ctx = stopCtx({
       conversationId: "conv-A",
       messages: [userText("improve the sanity skill")],
@@ -41,7 +45,11 @@ describe("level-up stop hook", () => {
 
   test("does not force a turn when the model already rendered a card", async () => {
     // GIVEN the turn recorded an edit AND the model already called ui_show
-    recordCapabilityEdit("conv-A", { kind: "plugin", name: "level-up", file: "hooks/stop.ts" }, false);
+    recordCapabilityEdit(
+      "conv-A",
+      { kind: "plugin", name: "level-up", file: "hooks/stop.ts" },
+      "updated",
+    );
     const ctx = stopCtx({
       conversationId: "conv-A",
       messages: [
