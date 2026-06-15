@@ -3,11 +3,12 @@
  * conversation.
  *
  * The `post-tool-use` hook records each capability edit as the turn runs;
- * the `stop` hook drains the batch once, at the turn boundary, to surface a
- * single "Level Up" card. State is intentionally ephemeral — a batch only
- * needs to live across one turn, so it is never persisted. If the daemon
- * restarts mid-turn the pending batch is lost, which is acceptable for a
- * best-effort, after-the-fact summary.
+ * the `post-model-call` hook reads the batch to drive a single "Level Up"
+ * card and the `stop` hook drains it at the turn boundary. State is
+ * intentionally ephemeral — a batch only needs to live across one turn, so it
+ * is never persisted. If the daemon restarts mid-turn the pending batch is
+ * lost, which is acceptable for a best-effort, after-the-fact summary (the
+ * durable history log in `history.ts` is the source of truth).
  */
 
 import type {
@@ -125,7 +126,34 @@ export function clearPendingCapabilities(conversationId: string): void {
   batches.delete(conversationId);
 }
 
+/**
+ * Conversations for which `post-model-call` has already injected one forced
+ * render. Separate from the per-batch `nudged` flag: the inline nudge is
+ * advisory and may be ignored, whereas this guards the single `continue`
+ * re-prompt so a non-compliant model can never trigger an unbounded loop.
+ */
+const forcedRender = new Set<string>();
+
+/**
+ * Mark that a forced render has been requested for this conversation. Returns
+ * `true` when this is the first request (caller should proceed with the
+ * `continue`), `false` when one was already issued (caller must not loop).
+ */
+export function markForcedRender(conversationId: string): boolean {
+  if (forcedRender.has(conversationId)) {
+    return false;
+  }
+  forcedRender.add(conversationId);
+  return true;
+}
+
+/** Clear the forced-render mark at the turn boundary. */
+export function clearForcedRender(conversationId: string): void {
+  forcedRender.delete(conversationId);
+}
+
 /** Test-only: wipe all in-process state between cases. */
 export function __resetForTests(): void {
   batches.clear();
+  forcedRender.clear();
 }

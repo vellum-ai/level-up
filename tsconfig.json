@@ -15,5 +15,5 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["hooks", "src", "types", "__tests__"]
+  "include": ["hooks", "routes", "src", "__tests__"]
 }

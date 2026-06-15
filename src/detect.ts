@@ -125,6 +125,32 @@ export function isToolUse(block: ContentBlock): block is ToolUseContent {
   return block.type === "tool_use";
 }
 
+/** Does this content carry any `tool_use` block (i.e. a tool-bearing reply)? */
+export function hasToolUse(content: ReadonlyArray<ContentBlock>): boolean {
+  return content.some(isToolUse);
+}
+
+/**
+ * Pull the unified-diff text out of a filesystem tool result. The `file_edit`
+ * result is a one-line summary followed by the diff; `file_write` is a summary
+ * line only (no diff). Returns the diff body, or `null` when the tool carries
+ * no diff text (a `file_write`, a managed-skill tool, or an empty diff).
+ */
+export function extractDiffText(
+  toolName: string,
+  resultContent: string,
+): string | null {
+  if (!EDIT_TOOL_NAMES.has(toolName)) {
+    return null;
+  }
+  const newlineIndex = resultContent.indexOf("\n");
+  if (newlineIndex === -1) {
+    return null;
+  }
+  const diff = resultContent.slice(newlineIndex + 1).trim();
+  return diff.length > 0 ? diff : null;
+}
+
 /**
  * Classify a managed-skill authoring tool call into a capability change.
  *

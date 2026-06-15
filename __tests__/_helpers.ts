@@ -12,6 +12,7 @@ import type {
   ContentBlock,
   Message,
   PluginLogger,
+  PostModelCallContext,
   PostToolUseContext,
   StopContext,
   ToolResultContent,
@@ -78,9 +79,29 @@ export function stopCtx(args: {
   return {
     conversationId: args.conversationId,
     messages: args.messages,
-    responseContent: [],
-    stopReason: "end_turn",
-    decision: "stop",
+    exitReason: "no_tool_calls",
     logger: noopLogger,
   } as unknown as StopContext;
+}
+
+export function postModelCallCtx(args: {
+  conversationId: string;
+  messages: Message[];
+  content?: ContentBlock[];
+  callSite?: string;
+  error?: Error;
+}): PostModelCallContext {
+  const lastAssistant = [...args.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  return {
+    conversationId: args.conversationId,
+    callSite: args.callSite ?? "mainAgent",
+    content: args.content ?? lastAssistant?.content ?? [],
+    messages: args.messages,
+    stopReason: "end_turn",
+    error: args.error,
+    decision: "stop",
+    logger: noopLogger,
+  } as unknown as PostModelCallContext;
 }
