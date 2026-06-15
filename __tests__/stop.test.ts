@@ -2,8 +2,8 @@
  * Behavioral tests for the level-up `stop` hook.
  *
  * The terminal `stop` boundary cannot continue the turn (its `messages` are
- * read-only and it carries no `decision`), so the forced "Level Up" render
- * lives in the `post-model-call` hook. This hook's only job is to flush the
+ * read-only and it carries no `decision`), so the "Level Up" card is shown
+ * from the `post-model-call` hook. This hook's only job is to flush the
  * conversation's ephemeral per-turn state so the next turn starts clean.
  *
  * Run with: `bun test __tests__/stop.test.ts`
@@ -15,7 +15,6 @@ import stop from "../hooks/stop.ts";
 import {
   __resetForTests,
   hasPendingCapabilities,
-  markForcedRender,
   recordCapabilityEdit,
 } from "../src/state.ts";
 import { stopCtx, userText } from "./_helpers.ts";
@@ -32,8 +31,6 @@ describe("level-up stop hook", () => {
       { kind: "skill", name: "sanity", file: "SKILL.md" },
       "updated",
     );
-    // AND a forced-render mark was set this turn
-    markForcedRender("conv-A");
     const ctx = stopCtx({
       conversationId: "conv-A",
       messages: [userText("improve the sanity skill")],
@@ -44,8 +41,6 @@ describe("level-up stop hook", () => {
 
     // THEN the batch is drained so the next turn starts clean
     expect(hasPendingCapabilities("conv-A")).toBe(false);
-    // AND the forced-render mark is cleared, so a fresh turn can force again
-    expect(markForcedRender("conv-A")).toBe(true);
   });
 
   test("only flushes the conversation it was called for", async () => {

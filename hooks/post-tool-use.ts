@@ -50,6 +50,7 @@ export default async function postToolUse(
   }
 
   const { ref, change } = edit;
+  const diff = extractDiffText(toolUse.name, toolResponse.content);
 
   appendHistoryEvent({
     conversationId: ctx.conversationId,
@@ -58,10 +59,15 @@ export default async function postToolUse(
     file: ref.file,
     change,
     tool: toolUse.name,
-    diff: extractDiffText(toolUse.name, toolResponse.content),
+    diff,
   });
 
-  const { shouldNudge } = recordCapabilityEdit(ctx.conversationId, ref, change);
+  const { shouldNudge } = recordCapabilityEdit(
+    ctx.conversationId,
+    ref,
+    change,
+    diff,
+  );
 
   if (shouldNudge) {
     ctx.additionalContext = buildInlineNudge(

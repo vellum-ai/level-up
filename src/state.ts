@@ -3,7 +3,7 @@
  * conversation.
  *
  * The `post-tool-use` hook records each capability edit as the turn runs;
- * the `post-model-call` hook reads the batch to drive a single "Level Up"
+ * the `post-model-call` hook reads the batch to build a single "Level Up"
  * card and the `stop` hook drains it at the turn boundary. State is
  * intentionally ephemeral — a batch only needs to live across one turn, so it
  * is never persisted. If the daemon restarts mid-turn the pending batch is
@@ -25,6 +25,12 @@ export interface PendingCapability {
   readonly files: string[];
   /** The net change to this capability across the turn's edits. */
   change: CapabilityChange;
+  /**
+   * Unified-diff text of the most recent diff-bearing edit to this capability
+   * this turn, used to render a compact preview in the card. `null` when no
+   * edit surfaced a diff (e.g. a `file_write` or a managed-skill tool).
+   */
+  diff: string | null;
 }
 
 /**
@@ -80,6 +86,7 @@ export function recordCapabilityEdit(
   conversationId: string,
   ref: CapabilityRef,
   change: CapabilityChange,
+  diff: string | null = null,
 ): RecordResult {
   let batch = batches.get(conversationId);
   if (batch === undefined) {
@@ -95,12 +102,18 @@ export function recordCapabilityEdit(
       name: ref.name,
       files: [ref.file],
       change,
+      diff,
     });
   } else {
     if (!existing.files.includes(ref.file)) {
       existing.files.push(ref.file);
     }
     existing.change = mergeChange(existing.change, change);
+    // Keep the newest diff-bearing edit; a later diffless edit (e.g. a
+    // `file_write`) does not erase a preview captured from an earlier one.
+    if (diff !== null) {
+      existing.diff = diff;
+    }
   }
 
   const shouldNudge = !batch.nudged;
@@ -126,34 +139,7 @@ export function clearPendingCapabilities(conversationId: string): void {
   batches.delete(conversationId);
 }
 
-/**
- * Conversations for which `post-model-call` has already injected one forced
- * render. Separate from the per-batch `nudged` flag: the inline nudge is
- * advisory and may be ignored, whereas this guards the single `continue`
- * re-prompt so a non-compliant model can never trigger an unbounded loop.
- */
-const forcedRender = new Set<string>();
-
-/**
- * Mark that a forced render has been requested for this conversation. Returns
- * `true` when this is the first request (caller should proceed with the
- * `continue`), `false` when one was already issued (caller must not loop).
- */
-export function markForcedRender(conversationId: string): boolean {
-  if (forcedRender.has(conversationId)) {
-    return false;
-  }
-  forcedRender.add(conversationId);
-  return true;
-}
-
-/** Clear the forced-render mark at the turn boundary. */
-export function clearForcedRender(conversationId: string): void {
-  forcedRender.delete(conversationId);
-}
-
 /** Test-only: wipe all in-process state between cases. */
 export function __resetForTests(): void {
   batches.clear();
-  forcedRender.clear();
 }

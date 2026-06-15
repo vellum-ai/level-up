@@ -1,14 +1,17 @@
 /**
  * Behavioral tests for the level-up `post-model-call` hook — the deterministic
- * backstop that forces a single follow-up turn to render the "Level Up" card
- * when the model ends its turn without one.
+ * backstop that shows the "Level Up" card by appending a synthetic `ui_show`
+ * tool call to the finalized reply when the model ends its turn without one.
  *
  * Run with: `bun test __tests__/post-model-call.test.ts`
  */
 
+import type { ToolUseContent } from "@vellumai/plugin-api";
+
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import postModelCall from "../hooks/post-model-call.ts";
+import { LEVEL_UP_APP_HREF } from "../src/nudge.ts";
 import {
   __resetForTests,
   hasPendingCapabilities,
@@ -25,16 +28,26 @@ beforeEach(() => {
   __resetForTests();
 });
 
-function recordEdit(conversationId: string): void {
+function recordEdit(conversationId: string, diff: string | null = null): void {
   recordCapabilityEdit(
     conversationId,
     { kind: "skill", name: "sanity", file: "SKILL.md" },
     "updated",
+    diff,
+  );
+}
+
+/** Find the injected `ui_show` block on a finalized reply, if any. */
+function injectedCard(content: readonly unknown[]): ToolUseContent | undefined {
+  return content.find(
+    (block): block is ToolUseContent =>
+      (block as ToolUseContent).type === "tool_use" &&
+      (block as ToolUseContent).name === "ui_show",
   );
 }
 
 describe("level-up post-model-call hook", () => {
-  test("forces one follow-up turn when a no-tool reply lands with the card unrendered", async () => {
+  test("appends a ui_show card when a no-tool reply lands with the card unrendered", async () => {
     // GIVEN the turn edited a skill but the model's reply rendered no card
     recordEdit("conv-A");
     const ctx = postModelCallCtx({
@@ -46,15 +59,48 @@ describe("level-up post-model-call hook", () => {
     // WHEN the hook runs
     await postModelCall(ctx);
 
-    // THEN it continues the loop with a fully-specified level-up nudge appended
-    expect(ctx.decision).toBe("continue");
-    const last = ctx.messages.at(-1);
-    expect(last?.role).toBe("user");
-    expect((last?.content[0] as { text: string }).text).toContain("[level-up]");
-    expect((last?.content[0] as { text: string }).text).toContain("ui_show");
+    // THEN it appends a ui_show work_result card without discarding the reply
+    expect(ctx.decision).toBe("stop");
+    expect(ctx.content).toHaveLength(2);
+    expect(ctx.content[0]).toEqual({
+      type: "text",
+      text: "Done — I improved the skill.",
+    });
+    const card = injectedCard(ctx.content);
+    expect(card).toBeDefined();
+    expect(card?.id).toBe("");
+    expect(card?.input.surface_type).toBe("work_result");
   });
 
-  test("does not force a turn when the model already rendered a card", async () => {
+  test("builds the card payload from the pending batch, with a link to the app", async () => {
+    // GIVEN a diff-bearing skill edit is pending
+    recordEdit("conv-A", "@@ -1 +1 @@\n-old line\n+new line");
+    const ctx = postModelCallCtx({
+      conversationId: "conv-A",
+      messages: [userText("improve the sanity skill")],
+      content: [{ type: "text", text: "Improved it." }],
+    });
+
+    // WHEN the hook runs
+    await postModelCall(ctx);
+
+    // THEN the card carries a compact diff preview and a link to the full app
+    const card = injectedCard(ctx.content);
+    const data = card?.input.data as {
+      sections: Array<Record<string, unknown>>;
+    };
+    const diffSection = data.sections.find((s) => s.type === "diff");
+    expect(diffSection).toBeDefined();
+    const diffs = diffSection?.diffs as Array<{ before: string; after: string }>;
+    expect(diffs[0]?.before).toContain("old line");
+    expect(diffs[0]?.after).toContain("new line");
+
+    const linkSection = data.sections.find((s) => s.type === "items");
+    const items = linkSection?.items as Array<{ href: string }>;
+    expect(items[0]?.href).toBe(LEVEL_UP_APP_HREF);
+  });
+
+  test("does not append a card when one was already rendered this turn", async () => {
     // GIVEN the model already called ui_show this turn
     recordEdit("conv-A");
     const ctx = postModelCallCtx({
@@ -73,9 +119,37 @@ describe("level-up post-model-call hook", () => {
     // WHEN the hook runs
     await postModelCall(ctx);
 
-    // THEN it leaves the run stopped and injects nothing
+    // THEN it injects nothing and leaves the reply untouched
     expect(ctx.decision).toBe("stop");
-    expect(ctx.messages).toHaveLength(3);
+    expect(ctx.content).toHaveLength(1);
+    expect(injectedCard(ctx.content)).toBeUndefined();
+  });
+
+  test("does not re-inject on the follow-up turn its own card triggered", async () => {
+    // GIVEN the prior turn's reply already carries the hook-injected ui_show
+    recordEdit("conv-A");
+    const ctx = postModelCallCtx({
+      conversationId: "conv-A",
+      messages: [
+        userText("improve the sanity skill"),
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Done — I improved the skill." },
+            toolUseBlock("", "ui_show", { surface_type: "work_result" }),
+          ],
+        },
+      ],
+      // The follow-up turn the executed ui_show re-entry produced
+      content: [{ type: "text", text: "Anything else?" }],
+    });
+
+    // WHEN the hook runs again on that follow-up turn
+    await postModelCall(ctx);
+
+    // THEN the rendered-card guard stops a second injection
+    expect(injectedCard(ctx.content)).toBeUndefined();
+    expect(ctx.content).toHaveLength(1);
   });
 
   test("skips a tool-bearing reply so the pending batch survives for the final reply", async () => {
@@ -90,8 +164,8 @@ describe("level-up post-model-call hook", () => {
     // WHEN the hook runs
     await postModelCall(ctx);
 
-    // THEN it does not continue, and the batch is retained for the no-tool reply
-    expect(ctx.decision).toBe("stop");
+    // THEN it does not inject, and the batch is retained for the no-tool reply
+    expect(injectedCard(ctx.content)).toBeUndefined();
     expect(hasPendingCapabilities("conv-A")).toBe(true);
   });
 
@@ -108,8 +182,8 @@ describe("level-up post-model-call hook", () => {
     // WHEN the hook runs
     await postModelCall(ctx);
 
-    // THEN it never forces a render on a non-user-facing call
-    expect(ctx.decision).toBe("stop");
+    // THEN it never injects on a non-user-facing call
+    expect(injectedCard(ctx.content)).toBeUndefined();
   });
 
   test("ignores provider rejections", async () => {
@@ -126,32 +200,7 @@ describe("level-up post-model-call hook", () => {
     await postModelCall(ctx);
 
     // THEN it does not act on the error outcome
-    expect(ctx.decision).toBe("stop");
-  });
-
-  test("forces at most one follow-up turn (one-shot guard)", async () => {
-    // GIVEN a no-tool reply that already triggered one forced render
-    recordEdit("conv-A");
-    const first = postModelCallCtx({
-      conversationId: "conv-A",
-      messages: [userText("improve the sanity skill")],
-      content: [{ type: "text", text: "Done." }],
-    });
-    await postModelCall(first);
-    expect(first.decision).toBe("continue");
-
-    // AND the model again ends without a card on the forced turn
-    const second = postModelCallCtx({
-      conversationId: "conv-A",
-      messages: [...first.messages, { role: "assistant", content: [{ type: "text", text: "Still no card." }] }],
-      content: [{ type: "text", text: "Still no card." }],
-    });
-
-    // WHEN the hook runs a second time
-    await postModelCall(second);
-
-    // THEN it refuses to loop again, so a non-compliant model cannot spin
-    expect(second.decision).toBe("stop");
+    expect(injectedCard(ctx.content)).toBeUndefined();
   });
 
   test("is a no-op when nothing was recorded this turn", async () => {
@@ -166,6 +215,7 @@ describe("level-up post-model-call hook", () => {
     await postModelCall(ctx);
 
     // THEN it does nothing
-    expect(ctx.decision).toBe("stop");
+    expect(injectedCard(ctx.content)).toBeUndefined();
+    expect(ctx.content).toHaveLength(1);
   });
 });
