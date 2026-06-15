@@ -35,8 +35,15 @@ import type { PluginInitContext, PluginLogger } from "@vellumai/plugin-api";
 
 import { setStorageDir } from "../src/history.js";
 
-/** Well-known id and directory slug of the bundled app. */
+/** Well-known id and directory slug of the bundled app once installed. */
 const APP_ID = "level-up";
+
+/**
+ * Location of the bundled app's source within this plugin, relative to the
+ * install root. The deployed app id ({@link APP_ID}) is distinct from this
+ * repo-local folder name.
+ */
+const APP_BUNDLE_SRC = ["apps", "skill-diff", "src"] as const;
 
 /** Basename of the installed route handler under `<workspace>/routes/`. */
 const ROUTE_FILE = "level-up.ts";
@@ -67,7 +74,7 @@ function upsertApp(appsDir: string, logger: PluginLogger): void {
     return;
   }
 
-  const templateSrc = join(pluginRoot(), "app", "src");
+  const templateSrc = join(pluginRoot(), ...APP_BUNDLE_SRC);
   if (!existsSync(templateSrc)) {
     logger.warn(
       { plugin: "level-up", templateSrc },

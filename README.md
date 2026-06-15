@@ -104,7 +104,7 @@ src/history.ts           durable, append-only edit log (the app's data source)
 src/state.ts             per-conversation pending-change accumulator
 src/nudge.ts             builds the ui_show instructions; card-already-shown check
 routes/level-up.ts       serves the history at GET /v1/x/level-up
-app/src/                 the bundled formatVersion-2 Level Up history app
+apps/skill-diff/src/     the bundled formatVersion-2 Level Up history app
 ```
 
 ## Development
