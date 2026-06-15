@@ -4,17 +4,38 @@
  * Run with: `bun test __tests__/post-tool-use.test.ts`
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 
 import postToolUse from "../hooks/post-tool-use.ts";
+import {
+  __resetForTests as __resetHistory,
+  historyPath,
+  readHistoryFrom,
+  setStorageDir,
+} from "../src/history.ts";
 import {
   __resetForTests,
   getPendingCapabilities,
 } from "../src/state.ts";
 import { assistantToolCall, postToolUseCtx, toolResult, userText } from "./_helpers.ts";
 
+let storageDir: string;
+
 beforeEach(() => {
   __resetForTests();
+  __resetHistory();
+  // Point the durable log at an isolated temp dir so the hook's history
+  // append never touches a real workspace during tests.
+  storageDir = mkdtempSync(join(tmpdir(), "level-up-ptu-"));
+  setStorageDir(storageDir);
+});
+
+afterEach(() => {
+  rmSync(storageDir, { recursive: true, force: true });
 });
 
 describe("level-up post-tool-use hook", () => {
@@ -40,6 +61,19 @@ describe("level-up post-tool-use hook", () => {
     // AND the model is nudged to render the Level Up card
     expect(ctx.additionalContext).toContain("[level-up]");
     expect(ctx.additionalContext).toContain("ui_show");
+    // AND the edit is durably appended to the history log the app reads
+    const path = historyPath();
+    expect(path).not.toBeNull();
+    const { events } = readHistoryFrom(path as string);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      conversationId: "conv-A",
+      kind: "skill",
+      name: "sanity",
+      file: "SKILL.md",
+      change: "updated",
+      tool: "file_edit",
+    });
   });
 
   test("merges a second edit to the same skill without re-nudging", async () => {

@@ -1,5 +1,10 @@
 /**
- * Behavioral tests for the level-up `stop` hook (the card backstop).
+ * Behavioral tests for the level-up `stop` hook.
+ *
+ * The terminal `stop` boundary cannot continue the turn (its `messages` are
+ * read-only and it carries no `decision`), so the forced "Level Up" render
+ * lives in the `post-model-call` hook. This hook's only job is to flush the
+ * conversation's ephemeral per-turn state so the next turn starts clean.
  *
  * Run with: `bun test __tests__/stop.test.ts`
  */
@@ -10,22 +15,25 @@ import stop from "../hooks/stop.ts";
 import {
   __resetForTests,
   hasPendingCapabilities,
+  markForcedRender,
   recordCapabilityEdit,
 } from "../src/state.ts";
-import { assistantToolCall, stopCtx, userText } from "./_helpers.ts";
+import { stopCtx, userText } from "./_helpers.ts";
 
 beforeEach(() => {
   __resetForTests();
 });
 
 describe("level-up stop hook", () => {
-  test("forces a follow-up turn when the model ended without a card", async () => {
-    // GIVEN the turn recorded a skill edit but rendered no ui_show card
+  test("drains the pending batch recorded this turn", async () => {
+    // GIVEN the turn recorded a skill edit
     recordCapabilityEdit(
       "conv-A",
       { kind: "skill", name: "sanity", file: "SKILL.md" },
       "updated",
     );
+    // AND a forced-render mark was set this turn
+    markForcedRender("conv-A");
     const ctx = stopCtx({
       conversationId: "conv-A",
       messages: [userText("improve the sanity skill")],
@@ -34,39 +42,31 @@ describe("level-up stop hook", () => {
     // WHEN the stop hook runs
     await stop(ctx);
 
-    // THEN it continues the loop and injects a level-up nudge message
-    expect(ctx.decision).toBe("continue");
-    const last = ctx.messages.at(-1);
-    expect(last?.role).toBe("user");
-    expect((last?.content[0] as { text: string }).text).toContain("[level-up]");
-    // AND the batch is drained so a later stop won't re-trigger
+    // THEN the batch is drained so the next turn starts clean
     expect(hasPendingCapabilities("conv-A")).toBe(false);
+    // AND the forced-render mark is cleared, so a fresh turn can force again
+    expect(markForcedRender("conv-A")).toBe(true);
   });
 
-  test("does not force a turn when the model already rendered a card", async () => {
-    // GIVEN the turn recorded an edit AND the model already called ui_show
+  test("only flushes the conversation it was called for", async () => {
+    // GIVEN two conversations each recorded an edit
     recordCapabilityEdit(
       "conv-A",
       { kind: "plugin", name: "level-up", file: "hooks/stop.ts" },
       "updated",
     );
-    const ctx = stopCtx({
-      conversationId: "conv-A",
-      messages: [
-        userText("improve the plugin"),
-        assistantToolCall("call-1", "file_edit", { path: "plugins/level-up/hooks/stop.ts" }),
-        assistantToolCall("call-2", "ui_show", { surface_type: "work_result" }),
-      ],
-    });
+    recordCapabilityEdit(
+      "conv-B",
+      { kind: "skill", name: "other", file: "SKILL.md" },
+      "created",
+    );
 
-    // WHEN the stop hook runs
-    await stop(ctx);
+    // WHEN the stop hook runs for conv-A only
+    await stop(stopCtx({ conversationId: "conv-A", messages: [] }));
 
-    // THEN it leaves the run stopped and injects nothing
-    expect(ctx.decision).toBe("stop");
-    expect(ctx.messages).toHaveLength(3);
-    // AND the batch is still drained
+    // THEN conv-A is drained but conv-B's batch is untouched
     expect(hasPendingCapabilities("conv-A")).toBe(false);
+    expect(hasPendingCapabilities("conv-B")).toBe(true);
   });
 
   test("is a no-op when nothing was recorded this turn", async () => {
@@ -79,8 +79,7 @@ describe("level-up stop hook", () => {
     // WHEN the stop hook runs
     await stop(ctx);
 
-    // THEN the run stops normally with no injected messages
-    expect(ctx.decision).toBe("stop");
-    expect(ctx.messages).toHaveLength(1);
+    // THEN there is still no pending batch
+    expect(hasPendingCapabilities("conv-A")).toBe(false);
   });
 });
