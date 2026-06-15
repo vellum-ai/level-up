@@ -56,7 +56,13 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN the edit is recorded against the conversation
     expect(getPendingCapabilities("conv-A")).toEqual([
-      { kind: "skill", name: "sanity", files: ["SKILL.md"], change: "updated" },
+      {
+        kind: "skill",
+        name: "sanity",
+        files: ["SKILL.md"],
+        change: "updated",
+        diff: null,
+      },
     ]);
     // AND the model is nudged to render the Level Up card
     expect(ctx.additionalContext).toContain("[level-up]");
@@ -108,10 +114,39 @@ describe("level-up post-tool-use hook", () => {
         name: "sanity",
         files: ["SKILL.md", "references/api.md"],
         change: "created",
+        diff: null,
       },
     ]);
     // AND the model is not nudged again for the same batch
     expect(secondCtx.additionalContext).toBeUndefined();
+  });
+
+  test("captures the unified-diff text from a diff-bearing file_edit", async () => {
+    // GIVEN a skill edit whose result carries a unified diff after the summary
+    const ctx = postToolUseCtx({
+      conversationId: "conv-A",
+      messages: [
+        assistantToolCall("call-1", "file_edit", { path: "skills/sanity/SKILL.md" }),
+      ],
+      toolResponse: toolResult(
+        "call-1",
+        "Applied 1 edit (+1 -1)\n@@ -1 +1 @@\n-old line\n+new line",
+      ),
+    });
+
+    // WHEN the hook runs
+    await postToolUse(ctx);
+
+    // THEN the diff body is retained on the capability for the card preview
+    expect(getPendingCapabilities("conv-A")).toEqual([
+      {
+        kind: "skill",
+        name: "sanity",
+        files: ["SKILL.md"],
+        change: "updated",
+        diff: "@@ -1 +1 @@\n-old line\n+new line",
+      },
+    ]);
   });
 
   test("ignores edits outside the skills/plugins trees", async () => {
@@ -191,7 +226,13 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN the skill is recorded as created and the model is nudged
     expect(getPendingCapabilities("conv-A")).toEqual([
-      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "created" },
+      {
+        kind: "skill",
+        name: "bam",
+        files: ["SKILL.md"],
+        change: "created",
+        diff: null,
+      },
     ]);
     expect(ctx.additionalContext).toContain("[level-up]");
   });
@@ -220,7 +261,13 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN the skill is recorded as updated
     expect(getPendingCapabilities("conv-A")).toEqual([
-      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "updated" },
+      {
+        kind: "skill",
+        name: "bam",
+        files: ["SKILL.md"],
+        change: "updated",
+        diff: null,
+      },
     ]);
   });
 
@@ -242,7 +289,13 @@ describe("level-up post-tool-use hook", () => {
 
     // THEN the skill is recorded as deleted and the model is nudged
     expect(getPendingCapabilities("conv-A")).toEqual([
-      { kind: "skill", name: "bam", files: ["SKILL.md"], change: "deleted" },
+      {
+        kind: "skill",
+        name: "bam",
+        files: ["SKILL.md"],
+        change: "deleted",
+        diff: null,
+      },
     ]);
     expect(ctx.additionalContext).toContain("[level-up]");
   });

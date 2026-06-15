@@ -1,14 +1,15 @@
 /**
- * Builds the model-facing instructions that drive the "Level Up" card, and
- * detects whether the model already rendered one this turn.
+ * Builds the in-turn nudge that invites the model to render the "Level Up"
+ * card itself, and detects whether a card was already rendered this turn.
  *
- * This plugin contributes no UI surface of its own. Instead it asks the
- * model to call the host's built-in `ui_show` tool with a `work_result`
- * surface: a compact, git-style preview of the latest self-edit plus a link
- * to the bundled Level Up app, which holds the full diff history. The model
- * already has the exact edit contents in its context, so it can populate a
- * faithful preview; the nudges below just guarantee the card is rendered,
- * once, after the fact.
+ * The card is a `ui_show` `work_result` surface: a compact, git-style preview
+ * of the latest self-edit plus a link to the bundled Level Up app, which holds
+ * the full diff history. The model already has the exact edit contents in its
+ * context, so the inline nudge below lets a compliant model render the card
+ * in-context. If it ends the turn without one, the `post-model-call` hook
+ * appends the `ui_show` call itself ({@link ../hooks/post-model-call}), so the
+ * card is shown either way; {@link alreadyRenderedCard} keeps the two paths
+ * from doubling up.
  */
 
 import type { Message } from "@vellumai/plugin-api";
@@ -51,71 +52,6 @@ export function buildInlineNudge(
     `contents from your edits above, and include a link item to "${LEVEL_UP_APP_HREF}".`,
     "Do not describe the card in prose.",
   ].join("\n");
-}
-
-/**
- * Stronger, fully-specified instruction injected when the model ends a turn
- * without rendering the card. Carries a concrete `ui_show` example so the
- * continued turn can render deterministically.
- */
-export function buildForcedRenderMessage(
-  capabilities: ReadonlyArray<PendingCapability>,
-): Message {
-  const sections = capabilities
-    .map((cap) => {
-      const diffs = cap.files
-        .map(
-          (file) =>
-            `        { "label": ${JSON.stringify(file)}, "before": "<a few key prior lines>", "after": "<a few key new lines>" }`,
-        )
-        .join(",\n");
-      return [
-        "      {",
-        `        "title": ${JSON.stringify(`${cap.name} (${cap.kind})`)},`,
-        '        "type": "diff",',
-        '        "description": "<what changed in this capability and why>",',
-        '        "diffs": [',
-        diffs,
-        "        ]",
-        "      }",
-      ].join("\n");
-    })
-    .join(",\n");
-
-  const text = [
-    "[level-up] This turn you improved your own capabilities:",
-    describeTargets(capabilities),
-    "",
-    'Before finishing, show the user a single "Level Up" card by calling the',
-    "`ui_show` tool exactly once. Keep each diff to a compact, git-style",
-    "preview (a few representative lines from your edits — the full history",
-    "lives in the linked app), and end with a link to the Level Up app:",
-    "",
-    "ui_show({",
-    '  "surface_type": "work_result",',
-    '  "title": "Level up",',
-    '  "display": "inline",',
-    '  "data": {',
-    '    "eyebrow": "Self-improvement",',
-    '    "status": "completed",',
-    '    "summary": "<one sentence: what you learned and why you changed it>",',
-    '    "sections": [',
-    sections,
-    ",",
-    "      {",
-    '        "type": "items",',
-    '        "items": [',
-    `          { "title": "Open Level Up", "description": "See the full diff history", "href": ${JSON.stringify(LEVEL_UP_APP_HREF)} }`,
-    "        ]",
-    "      }",
-    "    ]",
-    "  }",
-    "})",
-    "",
-    "Render the card, then end your turn. Do not narrate it in prose.",
-  ].join("\n");
-
-  return { role: "user", content: [{ type: "text", text }] };
 }
 
 /**
