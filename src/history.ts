@@ -14,6 +14,7 @@
  */
 
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -82,23 +83,46 @@ let sequence = 0;
  * Record the plugin storage directory. Called by the `init` hook with
  * {@link PluginInitContext.pluginStorageDir}.
  */
-export function setStorageDir(dir: string): void {
+export function setStorageDir(dir: string | null): void {
   storageDir = dir;
 }
+
+/**
+ * Storage locations to probe when `init` has not run in this process, in the
+ * order the host has used them. Naming one shape outright appends history to a
+ * directory the host does not use under the other, splitting the log across two
+ * places, so probe for the one that actually exists.
+ */
+const FALLBACK_STORAGE_CANDIDATES = [
+  ["plugins", "level-up", "data"],
+  ["plugins-data", "level-up"],
+] as const;
 
 /**
  * Resolve the storage directory, falling back to the workspace env var when
  * `init` has not run in this process (e.g. an isolated unit of work). Returns
  * `null` when no location can be determined, so callers degrade quietly
  * rather than throwing inside a hook.
+ *
+ * The fallback never invents a directory: an absent one means the host has not
+ * created storage for this plugin, and writing to a guessed path would strand
+ * entries where nothing reads them.
+ *
+ * Exported for unit testing; callers use {@link historyPath}.
  */
-function resolveStorageDir(): string | null {
+export function resolveStorageDir(): string | null {
   if (storageDir !== null) {
     return storageDir;
   }
   const workspaceDir = process.env.VELLUM_WORKSPACE_DIR;
-  if (workspaceDir !== undefined && workspaceDir !== "") {
-    return join(workspaceDir, "plugins-data", "level-up");
+  if (workspaceDir === undefined || workspaceDir === "") {
+    return null;
+  }
+  for (const segments of FALLBACK_STORAGE_CANDIDATES) {
+    const candidate = join(workspaceDir, ...segments);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
   }
   return null;
 }
