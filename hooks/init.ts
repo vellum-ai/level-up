@@ -30,7 +30,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { PluginInitContext, PluginLogger } from "@vellumai/plugin-api";
@@ -65,11 +65,39 @@ function pluginRoot(): string {
 }
 
 /**
- * Derive the workspace root from the plugin storage directory, which the host
- * documents as `<workspaceDir>/plugins-data/<plugin>/`.
+ * Directory names the host has used to contain plugin storage. The workspace
+ * root is the parent of whichever one appears on the storage path.
  */
-function workspaceRoot(pluginStorageDir: string): string {
-  return dirname(dirname(pluginStorageDir));
+const PLUGIN_STORAGE_CONTAINERS = new Set(["plugins", "plugins-data"]);
+
+/**
+ * Derive the workspace root from this plugin's storage directory.
+ *
+ * The host has shipped two storage shapes: `<workspace>/plugins-data/<plugin>/`
+ * and `<workspace>/plugins/<plugin>/data`. Counting path segments encodes one
+ * of them, and under the other it resolves one level short and seeds the app
+ * and route inside `<workspace>/plugins/` where nothing serves them. Walking up
+ * to the container the host actually used and taking its parent is correct for
+ * both, and stays correct if the depth changes again.
+ *
+ * The walk is bottom-up, so a workspace that itself sits under a directory
+ * named `plugins` still resolves to the innermost container.
+ *
+ * Returns null when the path matches no known shape, so callers skip rather
+ * than write to a guessed location.
+ */
+function workspaceRoot(pluginStorageDir: string): string | null {
+  let dir = pluginStorageDir;
+  for (;;) {
+    const parent = dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    if (PLUGIN_STORAGE_CONTAINERS.has(basename(dir))) {
+      return parent;
+    }
+    dir = parent;
+  }
 }
 
 /**
@@ -168,6 +196,14 @@ export default async function init(ctx: PluginInitContext): Promise<void> {
   setStorageDir(ctx.pluginStorageDir);
 
   const workspaceDir = workspaceRoot(ctx.pluginStorageDir);
+  if (workspaceDir === null) {
+    ctx.logger.warn(
+      { plugin: "level-up", pluginStorageDir: ctx.pluginStorageDir },
+      "level-up could not locate the workspace root from its storage directory " +
+        "— skipping app and route install rather than writing to a guessed path",
+    );
+    return;
+  }
 
   try {
     upsertApp(join(workspaceDir, "data", "apps"), ctx.logger);

@@ -4,7 +4,13 @@
  * Run with: `bun test __tests__/history.test.ts`
  */
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +25,7 @@ import {
   MAX_EVENTS,
   readHistoryFrom,
   setStorageDir,
+  resolveStorageDir,
 } from "../src/history.ts";
 
 let storageDir: string;
@@ -143,5 +150,56 @@ describe("history log", () => {
     // THEN only the final history file exists, not the `.tmp` staging file
     expect(existsSync(join(storageDir, HISTORY_FILE))).toBe(true);
     expect(existsSync(join(storageDir, `${HISTORY_FILE}.tmp`))).toBe(false);
+  });
+});
+
+/**
+ * The fallback runs only when `init` has not wired storage in this process.
+ * It must locate whichever storage shape the host actually created rather than
+ * naming one: appending to the shape the host is not using splits the log
+ * across two directories, and inventing a directory strands entries where
+ * nothing reads them.
+ */
+describe("storage fallback across host shapes", () => {
+  let ws: string;
+  const savedWorkspace = process.env.VELLUM_WORKSPACE_DIR;
+
+  beforeEach(() => {
+    ws = mkdtempSync(join(tmpdir(), "level-up-fallback-"));
+    process.env.VELLUM_WORKSPACE_DIR = ws;
+    // Clear the wired dir so the fallback path is the one under test.
+    setStorageDir(null);
+  });
+
+  afterEach(() => {
+    rmSync(ws, { recursive: true, force: true });
+    if (savedWorkspace === undefined) {
+      delete process.env.VELLUM_WORKSPACE_DIR;
+    } else {
+      process.env.VELLUM_WORKSPACE_DIR = savedWorkspace;
+    }
+  });
+
+  test("finds the current installed shape", () => {
+    const dir = join(ws, "plugins", "level-up", "data");
+    mkdirSync(dir, { recursive: true });
+    expect(resolveStorageDir()).toBe(dir);
+  });
+
+  test("finds the legacy shape", () => {
+    const dir = join(ws, "plugins-data", "level-up");
+    mkdirSync(dir, { recursive: true });
+    expect(resolveStorageDir()).toBe(dir);
+  });
+
+  test("prefers the current shape when both exist", () => {
+    const current = join(ws, "plugins", "level-up", "data");
+    mkdirSync(current, { recursive: true });
+    mkdirSync(join(ws, "plugins-data", "level-up"), { recursive: true });
+    expect(resolveStorageDir()).toBe(current);
+  });
+
+  test("returns null rather than inventing a directory", () => {
+    expect(resolveStorageDir()).toBeNull();
   });
 });
