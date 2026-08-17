@@ -64,9 +64,13 @@ describe("level-up post-tool-use hook", () => {
         diff: null,
       },
     ]);
-    // AND the model is nudged to render the Level Up card
+    // AND the model is nudged to render the Level Up card, linking the skill
+    // to its page's History tab
     expect(ctx.additionalContext).toContain("[level-up]");
     expect(ctx.additionalContext).toContain("ui_show");
+    expect(ctx.additionalContext).toContain(
+      "/assistant/skills/sanity?tab=history",
+    );
     // AND the edit is durably appended to the history log the app reads
     const path = historyPath();
     expect(path).not.toBeNull();

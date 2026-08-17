@@ -16,7 +16,7 @@ The plugin contributes lifecycle hooks (no host changes required) plus a
 bundled, multifile app it installs into the workspace. It records every
 self-edit to a durable log — the source of truth — and drives the host's
 built-in `ui_show` tool to render a compact, after-the-fact preview that links
-to the app for the full history.
+to the full history: a changed skill's own History tab, or the app.
 
 1. **`init`** — fires once at daemon startup. It wires the durable history
    module to the plugin's writable data directory, upserts the bundled
@@ -53,7 +53,10 @@ to the app for the full history.
    clean.
 
 The card is the host's `ui_show` `work_result` surface with `diff` sections and
-a link to the bundled app at `/assistant/library/level-up`:
+a History section. Each changed skill links to its own page opened on its
+History tab (`/assistant/skills/<name>?tab=history`, the host's revision view
+read from workspace git); plugin changes and deleted skills link to the bundled
+app at `/assistant/library/level-up`:
 
 ```jsonc
 {
@@ -68,6 +71,17 @@ a link to the bundled app at `/assistant/library/level-up`:
         "title": "sanity (skill)",
         "type": "diff",
         "diffs": [{ "label": "SKILL.md", "before": "…", "after": "…" }]
+      },
+      {
+        "title": "History",
+        "type": "items",
+        "items": [
+          {
+            "title": "sanity history",
+            "description": "Every change to this skill, newest first",
+            "href": "/assistant/skills/sanity?tab=history"
+          }
+        ]
       }
     ]
   }

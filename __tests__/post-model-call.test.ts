@@ -11,7 +11,7 @@ import type { ToolUseContent } from "@vellumai/plugin-api";
 import { beforeEach, describe, expect, test } from "bun:test";
 
 import postModelCall from "../hooks/post-model-call.ts";
-import { LEVEL_UP_APP_HREF } from "../src/nudge.ts";
+import { LEVEL_UP_APP_HREF, skillHistoryHref } from "../src/nudge.ts";
 import {
   __resetForTests,
   hasPendingCapabilities,
@@ -72,7 +72,7 @@ describe("level-up post-model-call hook", () => {
     expect(card?.input.surface_type).toBe("work_result");
   });
 
-  test("builds the card payload from the pending batch, with a link to the app", async () => {
+  test("builds the card payload from the pending batch, with a link to the skill's History tab", async () => {
     // GIVEN a diff-bearing skill edit is pending
     recordEdit("conv-A", "@@ -1 +1 @@\n-old line\n+new line");
     const ctx = postModelCallCtx({
@@ -84,7 +84,8 @@ describe("level-up post-model-call hook", () => {
     // WHEN the hook runs
     await postModelCall(ctx);
 
-    // THEN the card carries a compact diff preview and a link to the full app
+    // THEN the card carries a compact diff preview and a History row that
+    // opens the skill's page on its History tab
     const card = injectedCard(ctx.content);
     const data = card?.input.data as {
       sections: Array<Record<string, unknown>>;
@@ -96,8 +97,50 @@ describe("level-up post-model-call hook", () => {
     expect(diffs[0]?.after).toContain("new line");
 
     const linkSection = data.sections.find((s) => s.type === "items");
+    expect(linkSection?.title).toBe("History");
     const items = linkSection?.items as Array<{ href: string }>;
-    expect(items[0]?.href).toBe(LEVEL_UP_APP_HREF);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.href).toBe(skillHistoryHref("sanity"));
+    expect(items[0]?.href).toBe("/assistant/skills/sanity?tab=history");
+  });
+
+  test("links plugin edits and deleted skills to the Level Up app, one row per target", async () => {
+    // GIVEN a batch with a plugin edit, a deleted skill, and a live skill
+    recordCapabilityEdit(
+      "conv-A",
+      { kind: "plugin", name: "greeter", file: "hooks/init.ts" },
+      "updated",
+      null,
+    );
+    recordCapabilityEdit(
+      "conv-A",
+      { kind: "skill", name: "retired", file: "SKILL.md" },
+      "deleted",
+      null,
+    );
+    recordEdit("conv-A");
+    const ctx = postModelCallCtx({
+      conversationId: "conv-A",
+      messages: [userText("tidy up my capabilities")],
+      content: [{ type: "text", text: "Tidied." }],
+    });
+
+    // WHEN the hook runs
+    await postModelCall(ctx);
+
+    // THEN the plugin and the deleted skill share one Level Up app row (a
+    // deleted skill's page would be "not found"), and the live skill gets its
+    // own History-tab row
+    const card = injectedCard(ctx.content);
+    const data = card?.input.data as {
+      sections: Array<Record<string, unknown>>;
+    };
+    const linkSection = data.sections.find((s) => s.type === "items");
+    const items = linkSection?.items as Array<{ href: string; title: string }>;
+    expect(items.map((item) => item.href)).toEqual([
+      LEVEL_UP_APP_HREF,
+      skillHistoryHref("sanity"),
+    ]);
   });
 
   test("does not append a card when one was already rendered this turn", async () => {
