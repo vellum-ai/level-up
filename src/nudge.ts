@@ -20,6 +20,28 @@ import type { PendingCapability } from "./state.js";
 /** In-product route to the bundled Level Up app (the full history view). */
 export const LEVEL_UP_APP_HREF = "/assistant/library/level-up";
 
+/**
+ * In-product route to a skill's page opened on its History tab, where the
+ * host shows the skill's recent revisions from workspace git. The skill id is
+ * its directory name, percent-encoded so it stays one path segment for the
+ * host's `skills/:skillId` route (the same shape the host's own links use).
+ */
+export function skillHistoryHref(name: string): string {
+  return `/assistant/skills/${encodeURIComponent(name)}?tab=history`;
+}
+
+/**
+ * Where the card should send the user for the full history of one changed
+ * capability: a skill that still exists links to its own History tab; a
+ * plugin, or a skill that was deleted (its page would be "not found"), links
+ * to the Level Up app, which holds every recorded self-edit.
+ */
+export function capabilityHistoryHref(cap: PendingCapability): string {
+  return cap.kind === "skill" && cap.change !== "deleted"
+    ? skillHistoryHref(cap.name)
+    : LEVEL_UP_APP_HREF;
+}
+
 const UI_SHOW_TOOL_NAMES: ReadonlySet<string> = new Set([
   "ui_show",
   "host_ui_show",
@@ -28,7 +50,8 @@ const UI_SHOW_TOOL_NAMES: ReadonlySet<string> = new Set([
 function describeTargets(capabilities: ReadonlyArray<PendingCapability>): string {
   return capabilities
     .map(
-      (cap) => `- ${cap.kind} "${cap.name}" — ${cap.change} ${cap.files.join(", ")}`,
+      (cap) =>
+        `- ${cap.kind} "${cap.name}" — ${cap.change} ${cap.files.join(", ")} (history: ${capabilityHistoryHref(cap)})`,
     )
     .join("\n");
 }
@@ -49,7 +72,9 @@ export function buildInlineNudge(
     '`work_result` surface to show the user a "Level Up" card: a compact,',
     "git-style preview of the most important change (a few diff lines, not the",
     "whole file) plus a link to the full history. Use the exact before/after",
-    `contents from your edits above, and include a link item to "${LEVEL_UP_APP_HREF}".`,
+    "contents from your edits above, and include one link item per capability",
+    "pointing at the history href listed for it above (a skill's own History",
+    "tab, or the Level Up app).",
     "Do not describe the card in prose.",
   ].join("\n");
 }

@@ -5,13 +5,14 @@
  * assistant reply; the host then runs it through the normal tool executor (as
  * if the model had called `ui_show` itself), so the card streams in as a
  * surface after any prose the model already produced. The card is a compact,
- * git-style preview of this turn's self-edits plus a link to the bundled
- * Level Up app, which holds the full diff history.
+ * git-style preview of this turn's self-edits plus a History section linking
+ * each changed skill to its page's History tab (and plugin or deleted-skill
+ * changes to the bundled Level Up app, which holds every recorded self-edit).
  */
 
 import type { ToolUseContent } from "@vellumai/plugin-api";
 
-import { LEVEL_UP_APP_HREF } from "./nudge.js";
+import { capabilityHistoryHref, LEVEL_UP_APP_HREF } from "./nudge.js";
 import type { PendingCapability } from "./state.js";
 
 /** Past-tense verb shown for each capability's change. */
@@ -99,6 +100,42 @@ function capabilitySection(cap: PendingCapability): Record<string, unknown> {
 }
 
 /**
+ * One link row per changed capability, each pointing at where its full history
+ * lives ({@link capabilityHistoryHref}). Rows that share a target collapse to
+ * one, so a batch of two plugin edits gets a single Level Up app row. The
+ * section carries a title because the host drops untitled sections.
+ */
+function historySection(
+  capabilities: ReadonlyArray<PendingCapability>,
+): Record<string, unknown> {
+  const items: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  for (const cap of capabilities) {
+    const href = capabilityHistoryHref(cap);
+    if (seen.has(href)) {
+      continue;
+    }
+    seen.add(href);
+    items.push(
+      href === LEVEL_UP_APP_HREF
+        ? {
+            id: "level-up-app",
+            title: "Open Level Up",
+            description: "Every recorded self-edit, newest first",
+            href,
+          }
+        : {
+            id: `history-${cap.name}`,
+            title: `${cap.name} history`,
+            description: "Every change to this skill, newest first",
+            href,
+          },
+    );
+  }
+  return { id: "history", title: "History", type: "items", items };
+}
+
+/**
  * Build the `ui_show` tool-use block for the current batch of self-edits. The
  * `id` is left empty for the host to backfill when it adopts the finalized
  * content. Caller guarantees `capabilities` is non-empty.
@@ -109,16 +146,7 @@ export function buildLevelUpToolUse(
   const sections: Array<Record<string, unknown>> = capabilities.map(
     capabilitySection,
   );
-  sections.push({
-    type: "items",
-    items: [
-      {
-        title: "Open Level Up",
-        description: "See the full diff history",
-        href: LEVEL_UP_APP_HREF,
-      },
-    ],
-  });
+  sections.push(historySection(capabilities));
 
   return {
     type: "tool_use",
